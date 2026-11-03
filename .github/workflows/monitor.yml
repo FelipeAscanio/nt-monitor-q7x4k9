@@ -1,0 +1,43 @@
+name: Monitor de stock Pokemon
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"   # cada 5 min (el mínimo de GitHub; puede retrasarse en horas pico)
+  workflow_dispatch:        # botón "Run workflow" para correrlo a mano
+
+concurrency:
+  group: monitor-stock
+  cancel-in-progress: false
+
+jobs:
+  revisar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      # Recupera el estado anterior para alertar solo cuando algo CAMBIA a disponible
+      - uses: actions/cache/restore@v4
+        with:
+          path: estado.json
+          key: estado-${{ github.run_id }}
+          restore-keys: estado-
+
+      - name: Revisar tiendas
+        run: python tracker.py
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          BESTBUY_API_KEY: ${{ secrets.BESTBUY_API_KEY }}
+
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: estado.json
+          key: estado-${{ github.run_id }}
