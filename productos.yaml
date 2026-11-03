@@ -33,10 +33,10 @@ ventanas:
 #
 # Los de abajo son EJEMPLOS desactivados: reemplázalos por los reales.
 productos:
-  - nombre: "Booster Box (ejemplo Target)"
+  - nombre: "30th Celebration Ultra Premium Collection (Night)"
     tienda: target
-    url: "https://www.target.com/p/-/A-00000000"
-    activo: false
+    url: "https://www.target.com/p/pok-233-mon-trading-card-game-30th-celebration-ultra-premium-collection-night/-/A-1012850572"
+    activo: true
 
   - nombre: "Booster Bundle (ejemplo Walmart)"
     tienda: walmart
