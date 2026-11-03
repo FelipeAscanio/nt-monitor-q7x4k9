@@ -21,6 +21,7 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import requests
 import yaml
@@ -41,11 +42,8 @@ DISPONIBLE, AGOTADO, BLOQUEADO, ERROR, DESCONOCIDO = (
 )
 
 NAVEGADOR = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
-    ),
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "User-Agent": "Mozilla/5.0 (compatible; monitor-stock-personal/1.0)",
+    "Accept": "text/html,application/xhtml+xml",
     "Accept-Language": "en-US,en;q=0.9",
 }
 
@@ -63,6 +61,10 @@ SENALES = {
     "target": {
         "disponible": ['"availability_status":"IN_STOCK"', "Add to cart"],
         "agotado": ['"availability_status":"OUT_OF_STOCK"', "Out of stock", "Sold out"],
+    },
+    "bestbuy": {
+        "disponible": ['"buttonState":"ADD_TO_CART"', "Add to Cart"],
+        "agotado": ['"buttonState":"SOLD_OUT', "Sold Out", "Coming Soon"],
     },
     "generico": {"disponible": ["Add to cart", "Add to Cart"], "agotado": ["Out of stock", "Sold out"]},
 }
@@ -82,7 +84,7 @@ def revisar_bestbuy(producto):
         return ERROR, "falta 'sku' en productos.yaml", None
     if not BESTBUY_API_KEY:
         # Sin llave de API, intentamos con la página normal.
-        return revisar_pagina(producto, tienda="generico")
+        return revisar_pagina(producto, tienda="bestbuy")
     url = (
         f"https://api.bestbuy.com/v1/products/{sku}.json"
         f"?show=name,onlineAvailability,salePrice,url&apiKey={BESTBUY_API_KEY}"
@@ -195,67 +197,120 @@ def clave(producto):
 
 # --------------------------------------------------------------- principal
 
+DIAS = {"lun": 0, "mar": 1, "mie": 2, "jue": 3, "vie": 4, "sab": 5, "dom": 6}
+
+
+def en_ventana(v, ahora_local):
+    """¿La hora local cae dentro de la ventana {dias, desde, hasta}?"""
+    dias = [DIAS[d.lower()[:3].replace("é", "e").replace("á", "a")] for d in v.get("dias", DIAS)]
+    h = ahora_local.strftime("%H:%M")
+    desde, hasta = v["desde"], v["hasta"]
+    if desde <= hasta:
+        return ahora_local.weekday() in dias and desde <= h < hasta
+    # Ventana que cruza la medianoche (ej. 23:00-01:00): cuenta el día en que empieza.
+    ayer = (ahora_local.weekday() - 1) % 7
+    return (ahora_local.weekday() in dias and h >= desde) or (ayer in dias and h < hasta)
+
+
 def ejecutar():
     config = yaml.safe_load(ARCHIVO_PRODUCTOS.read_text(encoding="utf-8")) or {}
     productos = [p for p in config.get("productos", []) if p.get("activo", True)]
+    ventanas = config.get("ventanas") or {}
+    zona = ZoneInfo(config.get("zona_horaria", "America/Chicago"))
+    duracion = float(config.get("duracion_ciclo_segundos", 270))
     estado = cargar_estado()
-    ahora = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    inicio = time.monotonic()
 
-    print(f"Revisando {len(productos)} productos ({ahora})")
+    def activa(tienda):
+        v = ventanas.get(tienda)
+        return v is not None and en_ventana(v, datetime.now(zona))
+
+    # Fuera de su ventana, una tienda se revisa 1 vez por ejecución (cada ~5 min),
+    # salvo que su ventana diga fuera_de_ventana: nada.
+    normales = [p for p in productos if not activa(p.get("tienda"))
+                and (ventanas.get(p.get("tienda")) or {}).get("fuera_de_ventana", "normal") != "nada"]
+    intensivos = [p for p in productos if activa(p.get("tienda"))]
+
+    print(f"Hora local: {datetime.now(zona):%a %H:%M} | normales: {len(normales)} | en ventana: {len(intensivos)}")
+    revisar_lista(normales, estado)
+    guardar_estado(estado)
+
+    # Dentro de una ventana: revisar en ciclo cada ~20-30 s hasta completar el ciclo.
+    ronda = 1
+    while intensivos and time.monotonic() - inicio < duracion:
+        cada = min(float((ventanas.get(p.get("tienda")) or {}).get("cada_segundos", 25)) for p in intensivos)
+        hubo_bloqueo = revisar_lista(intensivos, estado, ronda=ronda)
+        guardar_estado(estado)
+        espera = 90 if hubo_bloqueo else random.uniform(cada * 0.8, cada * 1.2)  # frena si nos bloquean
+        if time.monotonic() - inicio + espera >= duracion:
+            break
+        time.sleep(espera)
+        ronda += 1
+        intensivos = [p for p in intensivos if activa(p.get("tienda"))]
+
+
+def revisar_lista(productos, estado, ronda=None):
+    hubo_bloqueo = False
+    if ronda:
+        print(f"-- ronda {ronda} en ventana")
     for i, p in enumerate(productos):
         if i:
-            time.sleep(random.uniform(2, 5))  # pausa para no saturar a las tiendas
+            time.sleep(random.uniform(1.5, 3.5))  # pausa para no saturar a las tiendas
+        hubo_bloqueo |= procesar(p, estado) == BLOQUEADO
+    return hubo_bloqueo
 
-        nuevo, detalle, precio = revisar(p)
-        k = clave(p)
-        previo = estado.get(k, {})
-        anterior = previo.get("estado")
-        bloqueos = previo.get("bloqueos_seguidos", 0) + 1 if nuevo == BLOQUEADO else 0
 
-        tope = p.get("precio_maximo")
-        caro = tope is not None and precio is not None and precio > float(tope)
-        precio_txt = f"${precio:,.2f}" if precio is not None else "precio n/d"
-        print(f"  [{p.get('tienda')}] {p['nombre']}: {nuevo} ({detalle}; {precio_txt})")
+def procesar(p, estado):
+    ahora = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    nuevo, detalle, precio = revisar(p)
+    k = clave(p)
+    previo = estado.get(k, {})
+    anterior = previo.get("estado")
+    bloqueos = previo.get("bloqueos_seguidos", 0) + 1 if nuevo == BLOQUEADO else 0
 
-        # Alerta solo cuando cambia a disponible (no en cada revisión).
-        if nuevo == DISPONIBLE and anterior != DISPONIBLE:
-            if caro:
-                print(f"    disponible pero arriba de tu precio máximo (${float(tope):,.2f}); no se alerta")
-            else:
-                notificar(
-                    f"¡DISPONIBLE en {p.get('tienda', '').title()}!",
-                    f"{p['nombre']}\n{precio_txt}",
-                    url=p.get("url"),
-                )
+    tope = p.get("precio_maximo")
+    caro = tope is not None and precio is not None and precio > float(tope)
+    precio_txt = f"${precio:,.2f}" if precio is not None else "precio n/d"
+    print(f"  [{p.get('tienda')}] {p['nombre']}: {nuevo} ({detalle}; {precio_txt})")
 
-        # Aviso único si una tienda lleva mucho tiempo bloqueando al script.
-        if bloqueos == AVISO_BLOQUEO_TRAS:
+    # Alerta solo cuando cambia a disponible (no en cada revisión).
+    if nuevo == DISPONIBLE and anterior != DISPONIBLE:
+        if caro:
+            print(f"    disponible pero arriba de tu precio máximo (${float(tope):,.2f}); no se alerta")
+        else:
             notificar(
-                "Monitor: tienda bloqueando consultas",
-                f"{p.get('tienda', '').title()} lleva {bloqueos} revisiones bloqueando "
-                f"'{p['nombre']}'. Ese producto no se está vigilando bien.",
-                prioridad=3, etiquetas=("warning",),
+                f"¡DISPONIBLE en {p.get('tienda', '').title()}!",
+                f"{p['nombre']}\n{precio_txt}",
+                url=p.get("url"),
             )
 
-        # Un bloqueo o error temporal no borra el último estado real conocido.
-        # Disponible pero caro se guarda aparte, para avisar si luego baja de precio.
-        if nuevo == DISPONIBLE and caro:
-            estado_guardado = "caro"
-        elif nuevo in (DISPONIBLE, AGOTADO):
-            estado_guardado = nuevo
-        else:
-            estado_guardado = anterior or nuevo
-        estado[k] = {
-            "nombre": p["nombre"],
-            "estado": estado_guardado,
-            "ultimo_resultado": nuevo,
-            "detalle": detalle,
-            "precio": precio,
-            "bloqueos_seguidos": bloqueos,
-            "revisado": ahora,
-        }
+    # Aviso único si una tienda lleva mucho tiempo bloqueando al script.
+    if bloqueos == AVISO_BLOQUEO_TRAS:
+        notificar(
+            "Monitor: tienda bloqueando consultas",
+            f"{p.get('tienda', '').title()} lleva {bloqueos} revisiones bloqueando "
+            f"'{p['nombre']}'. Ese producto no se está vigilando bien.",
+            prioridad=3, etiquetas=("warning",),
+        )
 
-    guardar_estado(estado)
+    # Un bloqueo o error temporal no borra el último estado real conocido.
+    # Disponible pero caro se guarda aparte, para avisar si luego baja de precio.
+    if nuevo == DISPONIBLE and caro:
+        estado_guardado = "caro"
+    elif nuevo in (DISPONIBLE, AGOTADO):
+        estado_guardado = nuevo
+    else:
+        estado_guardado = anterior or nuevo
+    estado[k] = {
+        "nombre": p["nombre"],
+        "estado": estado_guardado,
+        "ultimo_resultado": nuevo,
+        "detalle": detalle,
+        "precio": precio,
+        "bloqueos_seguidos": bloqueos,
+        "revisado": ahora,
+    }
+    return nuevo
 
 
 def diagnostico(url):
