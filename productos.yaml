@@ -1,0 +1,37 @@
+# Lista de productos a vigilar.
+# Copia un bloque, cambia los datos y guarda. Para pausar uno sin borrarlo: activo: false
+#
+# Campos:
+#   nombre          Cómo aparecerá en la notificación
+#   tienda          bestbuy | walmart | target | amazon | generico
+#   url             Enlace a la página del producto (al tocar la alerta se abre aquí)
+#   sku             Solo Best Buy: el número "SKU" que aparece en la página del producto
+#   precio_maximo   (opcional) No alerta si el precio es mayor (útil contra revendedores en Amazon/Walmart)
+#   textos_disponible / textos_agotado  (opcional) Señales personalizadas para esa página
+#
+# Los productos de abajo son EJEMPLOS: reemplaza url/sku por los reales.
+
+productos:
+  - nombre: "Elite Trainer Box (ejemplo Best Buy)"
+    tienda: bestbuy
+    sku: "0000000"
+    url: "https://www.bestbuy.com/site/0000000.p?skuId=0000000"
+    precio_maximo: 60
+    activo: false
+
+  - nombre: "Booster Bundle (ejemplo Walmart)"
+    tienda: walmart
+    url: "https://www.walmart.com/ip/000000000"
+    precio_maximo: 35
+    activo: false
+
+  - nombre: "Booster Box (ejemplo Target)"
+    tienda: target
+    url: "https://www.target.com/p/-/A-00000000"
+    activo: false
+
+  - nombre: "Elite Trainer Box (ejemplo Amazon)"
+    tienda: amazon
+    url: "https://www.amazon.com/dp/B000000000"
+    precio_maximo: 60
+    activo: false
