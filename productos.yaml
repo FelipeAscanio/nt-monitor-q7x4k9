@@ -36,7 +36,7 @@ productos:
   - nombre: "30th Celebration Ultra Premium Collection (Night)"
     tienda: target
     url: "https://www.target.com/p/pok-233-mon-trading-card-game-30th-celebration-ultra-premium-collection-night/-/A-1012850572"
-    activo: true
+    activo: false
 
   - nombre: "Booster Bundle (ejemplo Walmart)"
     tienda: walmart
