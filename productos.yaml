@@ -1,22 +1,41 @@
-# Lista de productos a vigilar.
-# Copia un bloque, cambia los datos y guarda. Para pausar uno sin borrarlo: activo: false
-#
-# Campos:
+# Configuración del monitor.
+# Para pausar un producto sin borrarlo: activo: false
+
+zona_horaria: America/Chicago
+
+# Ventanas de vigilancia intensiva (cada ~20-30 s) por tienda.
+#   dias: lun, mar, mie, jue, vie, sab, dom
+#   desde / hasta: hora local en formato 24 h (HH:MM)
+#   cada_segundos: cada cuánto revisar dentro de la ventana
+#   fuera_de_ventana: normal (revisa cada ~5 min) | nada (no revisa)
+# Las tiendas sin ventana se revisan cada ~5 min todo el día.
+ventanas:
+  target:
+    dias: [mar, mie, jue, vie]
+    desde: "02:00"
+    hasta: "04:00"
+    cada_segundos: 25
+    fuera_de_ventana: normal
+
+  walmart:
+    dias: [mie]
+    desde: "19:59"
+    hasta: "21:00"
+    cada_segundos: 25
+    fuera_de_ventana: normal
+
+# Productos a vigilar.
 #   nombre          Cómo aparecerá en la notificación
 #   tienda          bestbuy | walmart | target | amazon | generico
-#   url             Enlace a la página del producto (al tocar la alerta se abre aquí)
-#   sku             Solo Best Buy: el número "SKU" que aparece en la página del producto
-#   precio_maximo   (opcional) No alerta si el precio es mayor (útil contra revendedores en Amazon/Walmart)
-#   textos_disponible / textos_agotado  (opcional) Señales personalizadas para esa página
+#   url             Página del producto (al tocar la alerta se abre aquí)
+#   sku             Solo Best Buy: número "SKU" de la página del producto
+#   precio_maximo   (opcional) No alerta si el precio es mayor (contra revendedores)
 #
-# Los productos de abajo son EJEMPLOS: reemplaza url/sku por los reales.
-
+# Los de abajo son EJEMPLOS desactivados: reemplázalos por los reales.
 productos:
-  - nombre: "Elite Trainer Box (ejemplo Best Buy)"
-    tienda: bestbuy
-    sku: "0000000"
-    url: "https://www.bestbuy.com/site/0000000.p?skuId=0000000"
-    precio_maximo: 60
+  - nombre: "Booster Box (ejemplo Target)"
+    tienda: target
+    url: "https://www.target.com/p/-/A-00000000"
     activo: false
 
   - nombre: "Booster Bundle (ejemplo Walmart)"
@@ -25,9 +44,11 @@ productos:
     precio_maximo: 35
     activo: false
 
-  - nombre: "Booster Box (ejemplo Target)"
-    tienda: target
-    url: "https://www.target.com/p/-/A-00000000"
+  - nombre: "Elite Trainer Box (ejemplo Best Buy)"
+    tienda: bestbuy
+    sku: "0000000"
+    url: "https://www.bestbuy.com/site/0000000.p?skuId=0000000"
+    precio_maximo: 60
     activo: false
 
   - nombre: "Elite Trainer Box (ejemplo Amazon)"
